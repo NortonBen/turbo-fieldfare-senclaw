@@ -258,6 +258,16 @@ remote authentication or TLS.
 See [Local server](docs/OPENAI_SERVER.md) for a test request, Python and
 OpenCode setup, prompt reuse, tool handling, and the supported API subset.
 
+### SenClaw Space App
+
+This fork also ships TurboFieldfare as a [SenClaw](https://github.com/NortonBen/SenClaw)
+Space App: an LLM provider with a web UI for installing the model, packaged as
+`turbo-fieldfare-app.zip` and published to the SenClaw hub from CI. Everything
+lives in new files (`Sources/TurboFieldfareSenClaw/`, `Vendor/SenclawSpace/`,
+`web/`) so merges from the upstream `turbo-fieldfare` repo stay trivial. See
+[SenClaw app](docs/SENCLAW_APP.md) for architecture, development, packaging,
+and release flow.
+
 ## Test and contribute
 
 Run the public test suite serially:

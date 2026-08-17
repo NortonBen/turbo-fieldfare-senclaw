@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TurboFieldfare</title>
+<style>
+  /* Rendered both standalone and inside the SenClaw settings modal (light and
+     dark). Every colour is a token so the media query swaps the palette whole. */
+  :root {
+    --bg: #f7f7f8; --panel: #fff; --line: #e3e3e7; --fg: #1a1a1e;
+    --muted: #6b6b76; --accent: #2c8a4b; --accent-fg: #fff;
+    --danger: #c0392b; --ok: #1f8a4c; --warn: #b7791f; --track: #e8e8ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --panel: #1f1f24; --line: #2e2e36; --fg: #ececf1;
+      --muted: #9a9aa6; --accent: #46b06c; --accent-fg: #0d0d10;
+      --danger: #e06c5b; --ok: #4cc98a; --warn: #e0b45b; --track: #2a2a32;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  h2 { font-size: 13px; margin: 22px 0 8px; color: var(--muted); font-weight: 600;
+       text-transform: uppercase; letter-spacing: .4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; word-break: break-all; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; margin-bottom: 10px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1; min-width: 0; }
+  .id { font-weight: 600; word-break: break-all; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .tag {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
+  }
+  .tag.on { color: var(--ok); border-color: var(--ok); }
+  .tag.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .tag.warn { color: var(--warn); border-color: var(--warn); }
+  button {
+    font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 7px;
+    cursor: pointer; border: 1px solid var(--line); background: var(--panel);
+    color: var(--fg); white-space: nowrap;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  input, select {
+    font: inherit; padding: 6px 10px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  }
+  .bar { height: 5px; background: var(--track); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  label.field b { color: var(--fg); font-weight: 600; }
+  .err { color: var(--danger); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+  .warned { color: var(--warn); font-size: 12px; }
+  .empty { color: var(--muted); padding: 20px; text-align: center; }
+  code { background: var(--track); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>TurboFieldfare</h1>
+<div class="sub" id="subtitle">Đang kết nối…</div>
+
+<h2>Model</h2>
+<div id="model"><div class="empty">Đang tải…</div></div>
+
+<h2>Cài đặt runtime</h2>
+<div class="card">
+  <div class="grid" id="settings"></div>
+  <div class="row" style="margin-top:12px">
+    <button class="primary" id="save">Lưu cài đặt</button>
+    <span class="meta" id="saved"></span>
+    <span class="warned" id="reloadwarn"></span>
+  </div>
+  <div class="meta" style="margin-top:8px">
+    Đổi ngữ cảnh / expert cache / prefill có hiệu lực ở lần <em>nạp model</em> kế
+    tiếp — bấm «Giải phóng» rồi «Nạp» (hoặc để lượt chat sau tự nạp).
+    <code>queueLimit</code> áp dụng khi app khởi động lại.
+  </div>
+</div>
+
+<script>
+// Every app call is RELATIVE, resolved against this page's own directory:
+// standalone that is the app root; inside SenClaw the page is served from
+// /api/space/apps/<id>/proxy/ and a root-absolute path would escape the proxy.
+const APP_BASE = new URL('.', location.href);
+const app = (p, o) => fetch(new URL(p, APP_BASE), o).then(async r => {
+  if (r.status === 204) return null;
+  const t = await r.text();
+  if (!r.ok) { let m = t; try { m = JSON.parse(t).error ?? t; } catch {} throw new Error(m || r.status); }
+  return t ? JSON.parse(t) : null;
+});
+// Daemon calls (model picker) only exist when the page is embedded. Guarded:
+// a proxy path that is not the daemon's known mount must degrade to
+// standalone mode, not throw at top level and kill the whole script.
+const APP_ID = (() => {
+  const seg = location.pathname.split('/api/space/apps/')[1];
+  return seg ? decodeURIComponent(seg.split('/')[0]) : null;
+})();
+const IN_SENCLAW = APP_ID !== null;
+const daemon = (p, o) => fetch(p, o).then(async r => {
+  const t = await r.text();
+  if (!r.ok) throw new Error(t || r.status);
+  return t ? JSON.parse(t) : null;
+});
+
+const $ = (s) => document.querySelector(s);
+const gb = (n) => n == null ? '?' : n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB'
+              : n >= 1e6 ? (n / 1e6).toFixed(0) + ' MB' : (n / 1e3).toFixed(0) + ' KB';
+
+let MODEL = null;        // last /api/model payload
+let ACTIVE_ID = null;    // daemon's active LLM config id, when embedded
+let downloadRate = { at: 0, bytes: 0, perSec: 0 };
+
+const PHASE_TEXT = {
+  idle: '', checking: 'Kiểm tra…', downloadingMetadata: 'Đọc metadata từ HuggingFace…',
+  planning: 'Lập kế hoạch repack…', reservingOutput: 'Cấp phát file đích…',
+  copying: 'Đang tải', hashing: 'Kiểm tra SHA-256', finalizing: 'Hoàn tất…',
+  cancelling: 'Đang hủy…', discarding: 'Đang xoá bản dở…', cancelled: 'Đã tạm dừng',
+  recoverable: 'Gián đoạn — tiếp tục được', installed: 'Đã cài', failed: 'Lỗi',
+};
+
+async function refreshActive() {
+  if (!IN_SENCLAW) return;
+  try {
+    const d = await daemon('/api/llm-config');
+    ACTIVE_ID = d.activeId ?? null;
+  } catch { /* daemon route unavailable — hide the active marker */ }
+}
+
+function render() {
+  const m = MODEL;
+  if (!m) return;
+  $('#subtitle').innerHTML =
+    `Gemma 4 26B-A4B chạy bằng engine TurboFieldfare (Metal, stream expert từ SSD) — lưu tại <code>${m.path}</code>`;
+
+  const st = m.install || { phase: 'idle' };
+  const eng = m.engine || {};
+  const cfgId = APP_ID ? `app:${APP_ID}:${m.modelId}` : null;
+  const isActive = cfgId && cfgId === ACTIVE_ID;
+  const installing = ['checking','downloadingMetadata','planning','reservingOutput','copying','hashing','finalizing','cancelling','discarding'].includes(st.phase);
+
+  let html = '<div class="card">';
+
+  // -- title row ----------------------------------------------------------
+  html += `<div class="row">
+    <div class="grow">
+      <div class="id">${m.displayName}</div>
+      <div class="meta">${m.repo} @ ${String(m.revision).slice(0, 10)}
+        ${m.installed ? ' · ' + gb(m.sizeBytes ?? m.installedBytes) + ' trên đĩa' : ''}
+        ${eng.memoryBytes ? ' · RAM app ' + gb(eng.memoryBytes) : ''}</div>
+    </div>
+    ${isActive ? '<span class="tag active">đang là LLM chính</span>' : ''}
+    ${eng.loaded ? '<span class="tag on">trong RAM</span>' : ''}
+    ${eng.loading ? '<span class="tag">đang nạp…</span>' : ''}
+    ${eng.busy ? '<span class="tag on">đang sinh</span>' : ''}
+    ${eng.reloadRequired ? '<span class="tag warn">cần nạp lại</span>' : ''}`;
+
+  if (m.installed) {
+    html += `
+      ${!eng.loaded && !eng.loading ? '<button data-act="load">Nạp</button>' : ''}
+      ${eng.loaded ? '<button data-act="unload">Giải phóng</button>' : ''}
+      ${IN_SENCLAW && !isActive ? '<button class="primary" data-act="use">Dùng làm LLM</button>' : ''}
+      <button class="danger" data-act="delete">Xoá</button>`;
+  }
+  html += '</div>';
+
+  // -- install area -------------------------------------------------------
+  if (!m.installed && !installing) {
+    const req = m.requirement;
+    html += `<div class="row" style="margin-top:10px">
+      <div class="grow meta">
+        Cần tải ~${gb(m.installedBytes)} (stream thẳng từ HuggingFace, repack tại chỗ, không cần chỗ chứa checkpoint gốc).
+        ${req ? `Cần trống ${gb(req.requiredBytes)}, còn ${gb(req.availableBytes)}.` : ''}
+        ${m.resumable ? '<br><b>Có bản tải dở</b> — «Tải về» sẽ tiếp tục từ chỗ đã dừng.' : ''}
+        ${m.partialReason ? `<br>Cây model chưa hợp lệ: ${m.partialReason}` : ''}
+      </div>
+      <button class="primary" data-act="install" ${req && !req.canInstall ? 'disabled' : ''}>
+        ${m.resumable ? 'Tải tiếp' : 'Tải về'}</button>
+      ${m.resumable ? '<button class="danger" data-act="discard">Xoá bản dở</button>' : ''}
+    </div>`;
+    if (req && !req.canInstall) {
+      html += `<div class="err">Không đủ dung lượng trống — cần ${gb(req.requiredBytes)}, còn ${gb(req.availableBytes)}.</div>`;
+    }
+    if (st.phase === 'failed') html += `<div class="err" style="margin-top:8px">Lỗi: ${st.message || 'không rõ'}</div>`;
+    if (st.phase === 'recoverable') html += `<div class="warned" style="margin-top:8px">Gián đoạn: ${st.message || ''} — bấm «Tải tiếp».</div>`;
+  }
+
+  if (installing) {
+    let detail = PHASE_TEXT[st.phase] ?? st.phase;
+    let pct = 0;
+    if (st.phase === 'copying') {
+      const done = (st.reusedBytes || 0) + (st.downloadedThisRunBytes || 0);
+      pct = st.totalBytes ? Math.round(done / st.totalBytes * 100) : 0;
+      // Rough rate/ETA from the poll deltas.
+      const now = Date.now();
+      if (downloadRate.at && now > downloadRate.at) {
+        const d = (st.downloadedThisRunBytes || 0) - downloadRate.bytes;
+        const inst = d > 0 ? d / ((now - downloadRate.at) / 1000) : 0;
+        downloadRate.perSec = downloadRate.perSec ? downloadRate.perSec * .7 + inst * .3 : inst;
+      }
+      downloadRate.at = now; downloadRate.bytes = st.downloadedThisRunBytes || 0;
+      const remain = st.totalBytes ? st.totalBytes - done : 0;
+      const eta = downloadRate.perSec > 1e5 ? remain / downloadRate.perSec : null;
+      detail = `Đang tải ${gb(done)} / ${gb(st.totalBytes)}`
+        + (st.reusedBytes ? ` (tái dùng ${gb(st.reusedBytes)})` : '')
+        + (downloadRate.perSec > 1e5 ? ` · ${gb(downloadRate.perSec)}/s` : '')
+        + (eta ? ` · còn ~${eta > 3600 ? (eta / 3600).toFixed(1) + ' giờ' : Math.ceil(eta / 60) + ' phút'}` : '');
+    } else if (st.phase === 'hashing') {
+      detail = `Kiểm tra SHA-256 · ${st.file || ''}`; pct = 97;
+    } else if (st.phase === 'finalizing') { pct = 99; }
+    html += `<div class="row" style="margin-top:10px">
+      <div class="grow meta">${detail}</div>
+      ${['cancelling','discarding'].includes(st.phase) ? '' : '<button data-act="cancel">Tạm dừng</button>'}
+    </div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="meta" style="margin-top:6px">Giữ trang này mở trong khi tải — app kiểu «session» sẽ bị daemon dừng khi không có ai dùng (bản tải dở vẫn được giữ để tiếp tục).</div>`;
+  }
+
+  if (m.installed && eng.lastError) {
+    html += `<div class="err" style="margin-top:8px">Lỗi nạp gần nhất: ${eng.lastError}</div>`;
+  }
+
+  html += '</div>';
+  $('#model').innerHTML = html;
+
+  // -- actions ------------------------------------------------------------
+  const act = (name, fn) => {
+    const b = document.querySelector(`[data-act="${name}"]`);
+    if (b) b.onclick = async () => {
+      b.disabled = true;
+      try { await fn(); } catch (e) { alert(e.message || e); }
+      poll(true);
+    };
+  };
+  act('install', () => app('api/model/install', { method: 'POST' }));
+  act('cancel', () => app('api/model/cancel', { method: 'POST' }));
+  act('discard', async () => {
+    if (!confirm('Xoá bản tải dở? Sẽ phải tải lại từ đầu.')) return;
+    await app('api/model/discard', { method: 'POST' });
+  });
+  act('load', () => app('api/model/load', { method: 'POST' }));
+  act('unload', () => app('api/model/unload', { method: 'POST' }));
+  act('delete', async () => {
+    if (!confirm('Xoá model đã cài (~14 GB)? Không hoàn tác được — phải tải lại.')) return;
+    await app('api/model', { method: 'DELETE' });
+  });
+  act('use', async () => {
+    try {
+      await daemon('/api/llm-config/active', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: cfgId, type: 'main' }),
+      });
+      await refreshActive();
+    } catch (e) { alert('Không đặt được model chính: ' + (e.message || e)); }
+  });
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+let ALLOWED = null;
+
+function renderSettings(s, allowed) {
+  ALLOWED = allowed;
+  const sel = (k, label, options, hint, fmt) => `
+    <label class="field"><b>${label}</b>
+      <select data-k="${k}">
+        ${options.map(v => `<option value="${v}"${String(s[k]) === String(v) ? ' selected' : ''}>${fmt ? fmt(v) : v}</option>`).join('')}
+      </select>
+      <span>${hint}</span>
+    </label>`;
+  const num = (k, label, hint) => `
+    <label class="field"><b>${label}</b>
+      <input data-k="${k}" type="number" step="1" value="${s[k]}">
+      <span>${hint}</span>
+    </label>`;
+  const onoff = (k, label, hint) => sel(k, label, [true, false], hint, v => v === true || v === 'true' ? 'Bật' : 'Tắt');
+
+  $('#settings').innerHTML =
+    sel('maxContextTokens', 'Ngữ cảnh tối đa', allowed.maxContextTokens,
+        'Cửa sổ ngữ cảnh khi nạp model. Lớn hơn tốn RAM KV hơn.', v => (v / 1024) + 'K')
+    + num('maxOutputTokens', 'Giới hạn sinh (token)', 'Trần token một lượt trả lời (hiện trong picker).')
+    + sel('expertCacheSlots', 'Expert cache (slot/layer)', allowed.expertCacheSlots,
+          '16 mặc định. Prefill theo chunk cần ≥ 16.')
+    + sel('expertCachePolicy', 'Chính sách cache', allowed.expertCachePolicy,
+          'LFU mặc định — giữ expert dùng nhiều.', v => String(v).toUpperCase())
+    + onoff('prefillEnabled', 'Prefill theo chunk', 'Tắt thì prompt dài chậm hơn đáng kể.')
+    + sel('prefillChunkTokens', 'Cỡ chunk prefill', allowed.prefillChunkTokens, '128 mặc định.')
+    + sel('rdadvisePolicy', 'Gợi ý đọc SSD (rdadvise)', allowed.rdadvisePolicy,
+          'off mặc định. Thử «adaptive» trên máy SSD chậm.')
+    + onoff('promptCacheEnabled', 'Prompt cache (KV reuse)', 'Tái dùng KV giữa các lượt cùng hội thoại.')
+    + num('queueLimit', 'Hàng đợi request', '1–16. Áp dụng khi app khởi động lại.')
+    + num('idleUnloadSeconds', 'Giải phóng sau (giây)', '0 = giữ trong RAM tới khi app bị dừng.');
+}
+
+async function loadSettings() {
+  const d = await app('api/settings');
+  renderSettings(d.settings, d.allowed);
+  $('#reloadwarn').textContent = settingsWarnText(d);
+}
+
+function settingsWarnText(d) {
+  const parts = [];
+  if (d.reloadRequired) parts.push('Model đang nạp theo cấu hình cũ — giải phóng rồi nạp lại để áp dụng.');
+  if (d.restartRequired) parts.push('queueLimit mới chỉ áp dụng khi app được khởi động lại.');
+  return parts.join(' ');
+}
+
+$('#save').onclick = async () => {
+  const body = {};
+  let emptyField = null;
+  document.querySelectorAll('#settings [data-k]').forEach(el => {
+    const k = el.dataset.k;
+    let v = el.value;
+    // An empty number would be silently ignored server-side and then reported
+    // as saved — refuse it here instead.
+    if (el.tagName === 'INPUT' && v.trim() === '') { emptyField = k; return; }
+    if (v === 'true') v = true;
+    else if (v === 'false') v = false;
+    else if (v !== '' && !isNaN(Number(v))) v = Number(v);
+    body[k] = v;
+  });
+  if (emptyField) { alert(`Ô «${emptyField}» đang trống — nhập một con số trước khi lưu.`); return; }
+  try {
+    const d = await app('api/settings', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    renderSettings(d.settings, d.allowed);
+    $('#reloadwarn').textContent = settingsWarnText(d);
+    $('#saved').textContent = 'Đã lưu ✓';
+    setTimeout(() => ($('#saved').textContent = ''), 2500);
+  } catch (e) { alert('Không lưu được: ' + (e.message || e)); }
+};
+
+// ── Poll ─────────────────────────────────────────────────────────────────────
+let pollTimer = null;
+async function poll(immediate) {
+  try {
+    MODEL = await app('api/model');
+    render();
+  } catch (e) {
+    $('#subtitle').innerHTML = `<span class="err">Không nối được tới app: ${e.message || e}</span>`;
+  }
+  const st = MODEL?.install?.phase;
+  const fast = ['checking','downloadingMetadata','planning','reservingOutput','copying','hashing','finalizing','cancelling','discarding'].includes(st)
+    || MODEL?.engine?.loading;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, fast ? 1200 : 5000);
+}
+
+(async () => {
+  await refreshActive();
+  await poll(true);
+  try { await loadSettings(); } catch (e) { console.warn('settings:', e); }
+})();
+</script>
+</body>
+</html>

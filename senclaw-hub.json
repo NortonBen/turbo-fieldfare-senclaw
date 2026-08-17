@@ -1,0 +1,17 @@
+{
+  "version": "0.1.0",
+  "category": "app",
+  "keywords": ["llm", "local-model", "provider", "gemma", "metal", "apple-silicon", "turbofieldfare"],
+  "permissions": {
+    "network": [
+      "127.0.0.1",
+      "huggingface.co",
+      "cdn-lfs.huggingface.co",
+      "cas-bridge.xethub.hf.co"
+    ],
+    "exec": ["./turbo-fieldfare-senclaw"]
+  },
+  "updater": "none",
+  "platform": "darwin-arm64",
+  "repo_url": "https://github.com/NortonBen/turbo-fieldfare-senclaw"
+}

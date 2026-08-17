@@ -14,6 +14,7 @@ let package = Package(
         .executable(name: "TurboFieldfareMac", targets: ["TurboFieldfareMac"]),
         .executable(name: "TurboFieldfareDecodeService", targets: ["TurboFieldfareDecodeService"]),
         .executable(name: "TurboFieldfareServer", targets: ["TurboFieldfareServer"]),
+        .executable(name: "turbo-fieldfare-senclaw", targets: ["TurboFieldfareSenClaw"]),
     ],
     dependencies: [
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.0"),
@@ -106,6 +107,25 @@ let package = Package(
             name: "TurboFieldfareValidationSupport",
             dependencies: ["TurboFieldfare"],
             path: "Sources/TurboFieldfareValidation/Support"
+        ),
+        // Vendored SenClaw Space App SDK (see Vendor/SenclawSpace/README.md).
+        // Swift 5 language mode on purpose: the SDK is a thread-per-connection
+        // socket server written against it.
+        .target(
+            name: "SenclawSpace",
+            path: "Vendor/SenclawSpace",
+            exclude: ["LICENSE", "README.md"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .executableTarget(
+            name: "TurboFieldfareSenClaw",
+            dependencies: ["SenclawSpace", "TurboFieldfare", "TurboFieldfareAppCore", "TurboFieldfareServerCore"],
+            path: "Sources/TurboFieldfareSenClaw"
+        ),
+        .testTarget(
+            name: "TurboFieldfareSenClawTests",
+            dependencies: ["TurboFieldfareSenClaw", "SenclawSpace", "TurboFieldfare", "TurboFieldfareAppCore", "TurboFieldfareServerCore"],
+            path: "Tests/TurboFieldfareSenClaw"
         ),
         .testTarget(
             name: "TurboFieldfareFormatTests",

@@ -4,6 +4,10 @@ require "pathname"
 require "set"
 require "uri"
 
+# Docs may legitimately contain non-ASCII text (Vietnamese docs, typographic
+# punctuation); read them as UTF-8 regardless of the host locale.
+Encoding.default_external = Encoding::UTF_8
+
 ROOT = Pathname.new(File.expand_path("..", __dir__))
 
 def markdown_files(arguments)

@@ -1,0 +1,128 @@
+name: SenClaw App
+
+# Build (and on tag: publish) the SenClaw Space App artifact.
+#
+# - Pull requests touching the app surface: tests + pack, and keep the zip as
+#   a workflow artifact for manual install-zip testing. (Plain pushes to main
+#   are already covered by ci.yml, which builds every product and runs every
+#   test target.)
+# - Tags `senclaw-v*` (e.g. senclaw-v0.1.0): the tag version must match
+#   senclaw-hub.json, then build, pack, attach the zip to a GitHub Release and
+#   publish it to the SenClaw hub (https://senclaw.bacnd.com) via the same
+#   multipart POST /api/v1/publish the `senclaw` CLI sends — the CLI itself
+#   lives in a Rust monorepo we do not want to build here.
+#
+# Requires repository secret SENCLAW_HUB_TOKEN (a `snc_pat_…` token with the
+# publish scope, from https://senclaw.bacnd.com/settings/tokens). The published
+# scope is forced server-side to the token owner's handle.
+
+on:
+  push:
+    tags:
+      - "senclaw-v*"
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "Sources/TurboFieldfareSenClaw/**"
+      - "Tests/TurboFieldfareSenClaw/**"
+      - "Vendor/SenclawSpace/**"
+      - "web/**"
+      - "senclaw-manifest.json"
+      - "senclaw-hub.json"
+      - "Scripts/senclaw_pack.sh"
+      - ".github/workflows/senclaw-app.yml"
+      - "Package.swift"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: senclaw-app-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches senclaw-hub.json
+        if: startsWith(github.ref, 'refs/tags/senclaw-v')
+        run: |
+          tag_version="${GITHUB_REF_NAME#senclaw-v}"
+          hub_version="$(ruby -rjson -e 'puts JSON.parse(File.read("senclaw-hub.json"))["version"]')"
+          if [ "$tag_version" != "$hub_version" ]; then
+            echo "tag senclaw-v$tag_version != senclaw-hub.json version $hub_version" >&2
+            echo "bump senclaw-hub.json (and commit) before tagging" >&2
+            exit 1
+          fi
+
+      - name: Run SenClaw app tests
+        run: Scripts/test.sh --filter TurboFieldfareSenClawTests
+
+      - name: Build and pack
+        run: Scripts/senclaw_pack.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: turbo-fieldfare-app
+          path: turbo-fieldfare-app.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/senclaw-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" turbo-fieldfare-app.zip \
+            --title "SenClaw app $GITHUB_REF_NAME" \
+            --notes "TurboFieldfare SenClaw Space App (darwin-arm64). Cài thủ công: \`curl -F \"file=@turbo-fieldfare-app.zip\" http://127.0.0.1:18788/api/space/apps/install-zip\` — hoặc \`senclaw hub install <scope>/turbo-fieldfare\`."
+
+      - name: Publish to SenClaw hub
+        if: startsWith(github.ref, 'refs/tags/senclaw-v')
+        env:
+          SENCLAW_HUB_TOKEN: ${{ secrets.SENCLAW_HUB_TOKEN }}
+          HUB_URL: https://senclaw.bacnd.com
+        run: |
+          if [ -z "$SENCLAW_HUB_TOKEN" ]; then
+            echo "secret SENCLAW_HUB_TOKEN chưa được cấu hình — không publish được" >&2
+            exit 1
+          fi
+          name="$(ruby -rjson -e 'puts JSON.parse(File.read("senclaw-manifest.json"))["id"]')"
+          description="$(ruby -rjson -e 'puts JSON.parse(File.read("senclaw-manifest.json"))["description"]')"
+          version="$(ruby -rjson -e 'puts JSON.parse(File.read("senclaw-hub.json"))["version"]')"
+          category="$(ruby -rjson -e 'puts JSON.parse(File.read("senclaw-hub.json"))["category"]')"
+          keywords="$(ruby -rjson -e 'puts JSON.parse(File.read("senclaw-hub.json"))["keywords"].join(",")')"
+          permissions="$(ruby -rjson -e 'puts JSON.generate(JSON.parse(File.read("senclaw-hub.json"))["permissions"])')"
+          repo_url="$(ruby -rjson -e 'puts JSON.parse(File.read("senclaw-hub.json"))["repo_url"]')"
+          platform="$(ruby -rjson -e 'puts JSON.parse(File.read("senclaw-hub.json"))["platform"]')"
+
+          # Same wire as `senclaw hub publish` (multipart POST /api/v1/publish,
+          # bearer token). A 409 means this version already exists — versions
+          # are immutable, bump senclaw-hub.json and re-tag.
+          http_code=$(curl -sS -o /tmp/publish-response.json -w "%{http_code}" \
+            -X POST "$HUB_URL/api/v1/publish" \
+            -H "Authorization: Bearer $SENCLAW_HUB_TOKEN" \
+            -F "kind=app" \
+            -F "name=$name" \
+            -F "version=$version" \
+            -F "description=$description" \
+            -F "category=$category" \
+            -F "keywords=$keywords" \
+            -F "permissions=$permissions" \
+            -F "repoUrl=$repo_url" \
+            -F "platform=$platform" \
+            -F "readme=<README.md" \
+            -F "file=@turbo-fieldfare-app.zip;type=application/zip")
+          cat /tmp/publish-response.json
+          echo
+          if [ "$http_code" -ge 300 ]; then
+            echo "publish thất bại: HTTP $http_code" >&2
+            if [ "$http_code" = "409" ]; then
+              echo "version $version đã tồn tại — bump senclaw-hub.json rồi tag lại" >&2
+            fi
+            exit 1
+          fi

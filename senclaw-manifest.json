@@ -1,0 +1,32 @@
+{
+  "id": "turbo-fieldfare",
+  "name": "TurboFieldfare",
+  "description": "Chạy Gemma 4 26B-A4B ngay trên Mac (Apple Silicon, chạy được cả máy 8 GB RAM) bằng engine TurboFieldfare thuần Swift + Metal: chỉ giữ ~1.6 GB trọng số chung trong RAM, stream các routed expert từ SSD theo từng token. Tải model thẳng từ HuggingFace (repack tại chỗ, tạm dừng/tiếp tục được), rồi phục vụ cho SenClaw như một LLM provider chuẩn OpenAI có hỗ trợ tool.",
+  "icon": "🐦",
+  "runtime": {
+    "kind": "server",
+    "mode": "session",
+    "runner": "binary",
+    "start": "./turbo-fieldfare-senclaw",
+    "healthPath": "/health",
+    "port": 4841,
+    "idleTimeoutSecs": 900
+  },
+  "requires": {
+    "os": [
+      "macos"
+    ]
+  },
+  "integration": {
+    "type": "iframe",
+    "url": "/",
+    "launcher": false,
+    "settings": true
+  },
+  "llm": {
+    "autoRegister": true,
+    "path": "/v1",
+    "adapt": "openai",
+    "displayName": "TurboFieldfare"
+  }
+}

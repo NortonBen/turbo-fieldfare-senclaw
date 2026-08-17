@@ -48,3 +48,8 @@ tmp/
 __pycache__/
 *.pyc
 .venv/
+
+# SenClaw Space App packaging + runtime cache
+release-senclaw/
+turbo-fieldfare-app.zip
+.senclaw/
