@@ -57,8 +57,29 @@ let republishModels: @Sendable () -> Void = {
     }
 }
 
+/// Auto load: warm the model in the background whenever it is installed and
+/// the setting says so. The daemon health-gates a new app on 30 seconds, so
+/// this never blocks startup — the port binds first, the load runs detached.
+/// Auto release is the idle sweeper below.
+let warmModel: @Sendable () -> Void = {
+    guard settingsStore.current.autoWarmEnabled, modelStore.isInstalled else { return }
+    let current = settingsStore.current
+    Task.detached {
+        do {
+            try await engine.ensureLoaded(settings: current, modelDirectory: modelDirectory)
+            log("auto-warm: model đã nạp sẵn")
+        } catch is SenClawEngine.EngineError {
+            // Already loading or busy — exactly what auto-warm wants.
+        } catch {
+            log("auto-warm thất bại: \(error)")
+        }
+    }
+}
+
 modelStore.onInstalled(republishModels)
+modelStore.onInstalled(warmModel)
 republishModels()
+warmModel()
 
 // Drop the resident model when the process stays alive without real turns —
 // settings-page traffic alone keeps a session app running, and ~1.6 GB of
@@ -102,13 +123,18 @@ Task.detached {
     exit(0)
 }
 
+// llmRoutes provides GET /v1/models; the app's own chat route replaces the
+// SDK's POST /v1/chat/completions so long silent prefills can heartbeat
+// through the daemon's 120-second stall timeout.
 var routes = llmRoutes(provider)
+routes.merge(SenClawChatRoute.routes(provider: provider)) { _, own in own }
 let managementRoutes = SenClawRoutes.build(SenClawRoutes.Context(
     store: modelStore,
     settings: settingsStore,
     engine: engine,
     memory: memorySampler,
-    republishModels: republishModels))
+    republishModels: republishModels,
+    warmModel: warmModel))
 routes.merge(managementRoutes) { _, management in management }
 
 log("model dir: \(modelDirectory.path)")

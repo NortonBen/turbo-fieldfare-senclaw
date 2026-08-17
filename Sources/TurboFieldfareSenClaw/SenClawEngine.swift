@@ -96,6 +96,17 @@ actor SenClawEngine {
                               turnsHeldBySelf: 0)
     }
 
+    /// Render-only probe: template + tokenize, no KV touched, no slot taken.
+    /// Used to bisect which tool schema breaks the chat template.
+    func prepareProbe(_ request: ValidatedChatRequest,
+                      settings: SenClawAppSettings,
+                      modelDirectory: URL) async throws {
+        lastUsed = Date()
+        let backend = try await backend(settings: settings, modelDirectory: modelDirectory,
+                                        turnsHeldBySelf: 0)
+        _ = try await backend.prepare(request)
+    }
+
     // -- lifecycle ---------------------------------------------------------
 
     func unload() throws {

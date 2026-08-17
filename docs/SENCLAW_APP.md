@@ -110,13 +110,20 @@ ký, chỗ vá duy nhất là `SenClawEngine`/`SenClawProvider`.
 - **Không nhận `mode: background`** dù tải model lâu: session là đúng nghĩa
   (app chỉ chạy khi được dùng); trade-off là download cần trang UI mở, đổi lại
   không chiếm một process suốt đời daemon.
-- **Giới hạn kế thừa từ SDK — phát hiện client ngắt kết nối**: `SSEWriter.isClosed`
-  chỉ bật sau một lần *ghi thất bại*, và path non-stream không có tín hiệu nào.
-  App đã chặn được turn xếp hàng mà stream đã đứt (check ở ranh giới slot) và
-  hủy giữa các token, nhưng một turn bị bỏ rơi khi **chưa stream gì** (đang
-  prefill dài) vẫn chạy hết lượt. Server SwiftNIO độc lập không dính giới hạn
-  này (hủy theo `channelInactive`) — dùng nó khi cần QoS chặt. Sửa tận gốc cần
-  SDK expose tín hiệu đóng kết nối chủ động.
+- **App tự sở hữu `POST /v1/chat/completions`** (`SenClawChatRoute`), không dùng
+  bản render của SDK. Lý do sống còn: daemon giết stream im lặng quá 120 s
+  (`STREAM_STALL_TIMEOUT`, reset theo từng byte), mà một lượt agent có thể
+  prefill nhiều phút trước token đầu — route riêng gửi **heartbeat chunk
+  delta-rỗng mỗi 10 s** (parser OpenAI bỏ qua nhưng timer được reset). Kèm
+  theo: lỗi validation trả đúng 400/404/429 *trước* khi mở stream, stream từng
+  token thật (bản SDK buffer), log chẩn đoán mỗi lượt (`[chat] … tools=N
+  ttfb=…`), và heartbeat fail làm `isClosed` bật → hủy được generation ngay
+  giữa prefill dài (giới hạn disconnect cũ của SDK gần như khép lại; chỉ path
+  non-stream còn chạy nốt lượt bị bỏ rơi).
 - **`queueLimit`** là knob duy nhất chỉ áp dụng khi app khởi động lại
   (`ServerCoordinator` bất biến sau khi tạo); API trả `restartRequired` và UI
   hiển thị rõ thay vì im lặng.
+- **Tự động nạp / tự giải phóng**: `autoWarmEnabled` (mặc định bật) nạp model
+  nền ngay khi app khởi động, sau khi tải xong, và khi bật toggle — lượt đầu
+  không phải đợi load; `idleUnloadSeconds` (mặc định 600) giải phóng RAM khi
+  không có lượt sinh nào. Cả hai chỉnh được trong UI.

@@ -26,6 +26,10 @@ struct SenClawAppSettings: Equatable, Sendable {
     /// stays alive (UI traffic keeps a session app running). 0 keeps it loaded
     /// until the daemon stops the process.
     var idleUnloadSeconds = 600
+    /// Warm the model in the background as soon as the app starts (and right
+    /// after an install finishes), so the first turn does not pay the load.
+    /// Paired with `idleUnloadSeconds`, this is the auto load/release cycle.
+    var autoWarmEnabled = true
 
     func validate() throws {
         guard Self.allowedContextTokens.contains(maxContextTokens) else {
@@ -103,6 +107,7 @@ struct SenClawAppSettings: Equatable, Sendable {
             "promptCacheEnabled": promptCacheEnabled,
             "queueLimit": queueLimit,
             "idleUnloadSeconds": idleUnloadSeconds,
+            "autoWarmEnabled": autoWarmEnabled,
         ]
     }
 
@@ -122,6 +127,7 @@ struct SenClawAppSettings: Equatable, Sendable {
         if let v = patch["promptCacheEnabled"] as? Bool { next.promptCacheEnabled = v }
         if let v = intValue(patch["queueLimit"]) { next.queueLimit = v }
         if let v = intValue(patch["idleUnloadSeconds"]) { next.idleUnloadSeconds = v }
+        if let v = patch["autoWarmEnabled"] as? Bool { next.autoWarmEnabled = v }
         return next
     }
 

@@ -94,6 +94,102 @@ final class SenClawProviderTests: XCTestCase {
         XCTAssertTrue(validated.includeUsage)
     }
 
+    func testUnrepresentableToolsAreDroppedNotFatal() throws {
+        // The exact failure that bricked real agent turns: one tool (FormUI)
+        // with a >2-branch union in its schema, sent alongside hundreds of
+        // fine tools. The bad tool must drop; the good one must survive.
+        let goodTool: [String: Any] = ["type": "function", "function": [
+            "name": "get_time",
+            "parameters": ["type": "object", "properties": [:] as [String: Any]],
+        ]]
+        let badTool: [String: Any] = ["type": "function", "function": [
+            "name": "FormUI",
+            "parameters": ["type": "object", "properties": [
+                "fields": ["type": "array", "items": [
+                    "anyOf": [["type": "string"], ["type": "number"], ["type": "boolean"]],
+                ]],
+            ]],
+        ]]
+        var raw: [String: Any] = [
+            "model": "gemma-4-26b-a4b-it",
+            "messages": [["role": "user", "content": "hi"]],
+            "tools": [goodTool, badTool],
+        ]
+        let dropped = SenClawProvider.filterUnrepresentableTools(&raw)
+        XCTAssertEqual(dropped, ["FormUI"])
+        XCTAssertEqual((raw["tools"] as? [Any])?.count, 1)
+
+        // And the filtered request now passes full validation.
+        let data = try JSONSerialization.data(withJSONObject: raw)
+        let decoded = try JSONDecoder().decode(OpenAIChatRequest.self, from: data)
+        let validated = try OpenAIRequestValidator.validate(decoded, modelID: "gemma-4-26b-a4b-it")
+        XCTAssertEqual(validated.tools.map(\.name), ["get_time"])
+    }
+
+    func testCleanToolListPassesFilterUntouched() {
+        var raw: [String: Any] = [
+            "model": "gemma-4-26b-a4b-it",
+            "messages": [["role": "user", "content": "hi"]],
+            "tools": [["type": "function", "function": [
+                "name": "ping",
+                "parameters": ["type": "object", "properties": [:] as [String: Any]],
+            ]]],
+        ]
+        XCTAssertEqual(SenClawProvider.filterUnrepresentableTools(&raw), [])
+        XCTAssertEqual((raw["tools"] as? [Any])?.count, 1)
+    }
+
+    func testRenderBisectFindsEveryCulpritWithFewProbes() {
+        func tool(_ name: String) -> [String: Any] {
+            ["type": "function", "function": ["name": name]]
+        }
+        let bad: Set<String> = ["FormUI", "mcp__core__browser_fill_form"]
+        let tools: [Any] = ["a", "b", "FormUI", "c", "mcp__core__browser_fill_form",
+                            "d", "e", "f"].map(tool)
+        var probes = 0
+        struct RenderBoom: Error {}
+        let found = SenClawProvider.renderBreakingTools(tools) { subset in
+            probes += 1
+            if subset.contains(where: { bad.contains(SenClawProvider.toolName($0)) }) {
+                throw RenderBoom()
+            }
+        }
+        XCTAssertEqual(Set(found), bad)
+        // Divide and conquer, not a linear scan of all 8.
+        XCTAssertLessThanOrEqual(probes, 12)
+    }
+
+    func testRenderErrorClassifierSeparatesTypedErrors() {
+        struct Jinja: Error, CustomStringConvertible {
+            var description: String { "runtime(\"upper filter requires string\")" }
+        }
+        XCTAssertTrue(SenClawProvider.isRenderError(Jinja()))
+        XCTAssertFalse(SenClawProvider.isRenderError(ServerRequestError.queueFull))
+        XCTAssertFalse(SenClawProvider.isRenderError(CancellationError()))
+    }
+
+    func testKnownRenderBreakingToolsAreDroppedUpFront() {
+        SenClawProvider.knownRenderBreakingTools.withLock { $0.insert("EvilTool") }
+        defer { SenClawProvider.knownRenderBreakingTools.withLock { $0.remove("EvilTool") } }
+        var raw: [String: Any] = [
+            "model": "gemma-4-26b-a4b-it",
+            "messages": [["role": "user", "content": "hi"]],
+            "tools": [
+                ["type": "function", "function": [
+                    "name": "EvilTool",
+                    "parameters": ["type": "object", "properties": [:] as [String: Any]],
+                ]],
+                ["type": "function", "function": [
+                    "name": "ok_tool",
+                    "parameters": ["type": "object", "properties": [:] as [String: Any]],
+                ]],
+            ],
+        ]
+        let dropped = SenClawProvider.filterUnrepresentableTools(&raw)
+        XCTAssertEqual(dropped, ["EvilTool"])
+        XCTAssertEqual((raw["tools"] as? [Any])?.count, 1)
+    }
+
     func testValidationErrorSurfacesOpenAIMessage() throws {
         let raw: [String: Any] = [
             "model": "khong-ton-tai",

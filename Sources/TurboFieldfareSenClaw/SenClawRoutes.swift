@@ -15,6 +15,9 @@ enum SenClawRoutes {
         /// Re-publishes the `.senclaw/llm-models.json` cache (or removes it
         /// after a delete) so the daemon's picker stays truthful.
         let republishModels: @Sendable () -> Void
+        /// Kicks a background model warm-up when auto-warm is on and the
+        /// model is installed. Safe to call redundantly.
+        let warmModel: @Sendable () -> Void
     }
 
     static func build(_ context: Context) -> [RouteKey: Handler] {
@@ -108,6 +111,9 @@ enum SenClawRoutes {
             do {
                 _ = try settings.update(body)
                 context.republishModels()
+                // Toggling auto-warm on should take effect now, not at the
+                // next app launch.
+                context.warmModel()
                 return settingsResponse(context)
             } catch {
                 return Response(json: ["error": "\(error)"], status: 400)

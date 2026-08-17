@@ -299,8 +299,9 @@ function renderSettings(s, allowed) {
     + sel('rdadvisePolicy', 'Gợi ý đọc SSD (rdadvise)', allowed.rdadvisePolicy,
           'off mặc định. Thử «adaptive» trên máy SSD chậm.')
     + onoff('promptCacheEnabled', 'Prompt cache (KV reuse)', 'Tái dùng KV giữa các lượt cùng hội thoại.')
-    + num('queueLimit', 'Hàng đợi request', '1–16. Áp dụng khi app khởi động lại.')
-    + num('idleUnloadSeconds', 'Giải phóng sau (giây)', '0 = giữ trong RAM tới khi app bị dừng.');
+    + onoff('autoWarmEnabled', 'Tự động nạp', 'Nạp model nền ngay khi app chạy / tải xong — lượt đầu không phải đợi.')
+    + num('idleUnloadSeconds', 'Tự giải phóng sau (giây)', '0 = giữ trong RAM tới khi app bị dừng.')
+    + num('queueLimit', 'Hàng đợi request', '1–16. Áp dụng khi app khởi động lại.');
 }
 
 async function loadSettings() {
