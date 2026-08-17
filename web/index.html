@@ -289,7 +289,7 @@ function renderSettings(s, allowed) {
   $('#settings').innerHTML =
     sel('maxContextTokens', 'Ngữ cảnh tối đa', allowed.maxContextTokens,
         'Cửa sổ ngữ cảnh khi nạp model. Lớn hơn tốn RAM KV hơn.', v => (v / 1024) + 'K')
-    + num('maxOutputTokens', 'Giới hạn sinh (token)', 'Trần token một lượt trả lời (hiện trong picker).')
+    + num('maxOutputTokens', 'Giới hạn sinh (token)', 'Agent SenClaw dùng nguyên giá trị này làm max_tokens mỗi lượt — để quá lớn (vd 32768) một lượt lan man có thể chiếm engine nhiều phút và vượt budget 180s/lượt của agent. 4096 là hợp lý.')
     + sel('expertCacheSlots', 'Expert cache (slot/layer)', allowed.expertCacheSlots,
           '16 mặc định. Prefill theo chunk cần ≥ 16.')
     + sel('expertCachePolicy', 'Chính sách cache', allowed.expertCachePolicy,

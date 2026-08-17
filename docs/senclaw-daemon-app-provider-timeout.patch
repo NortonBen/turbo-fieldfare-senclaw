@@ -1,0 +1,35 @@
+Đề xuất vá SemaClaw (daemon): cho app-provider loopback dùng budget local 900s
+==============================================================================
+
+Vấn đề: agent cho mỗi lượt LLM đúng 180s với provider "cloud"
+(LLM_TURN_TIMEOUT), và 900s cho engine local (LLM_TURN_TIMEOUT_LOCAL,
+adapt bắt đầu bằng "local-"). Space App LLM provider (adapt "openai",
+provider "app:<id>") đi qua proxy loopback và chạy suy luận local — đúng
+lớp engine mà budget 900s sinh ra để phục vụ (chính comment trong
+conversation.rs thừa nhận: "prompt holds many MCP tool schemas ...
+easily exceeds the cloud-API timeout") — nhưng đang bị xếp vào nhánh
+cloud 180s. Với model 26B stream expert từ SSD, prefill lượt đầu của
+prompt agent (hàng chục tool schema) vượt 180s → mọi lượt chat đầu tiên
+fail bằng LLM_TIMEOUT dù app vẫn stream heartbeat đều đặn.
+
+Vá (1 điều kiện, src/zen_core/conversation.rs, quanh dòng 1030):
+
+--- a/src/zen_core/conversation.rs
++++ b/src/zen_core/conversation.rs
+@@
+         let adapt = config.profile.adapt.as_deref().unwrap_or("");
+-        let turn_timeout = if adapt.starts_with("local-") {
++        // Space-App providers (`provider == "app:<id>"`) are loopback
++        // engines behind the daemon's own proxy — the exact class the
++        // local budget exists for.
++        let turn_timeout = if adapt.starts_with("local-")
++            || config.profile.provider.starts_with("app:")
++        {
+             LLM_TURN_TIMEOUT_LOCAL
+         } else {
+             LLM_TURN_TIMEOUT
+         };
+
+Sau khi vá: cargo build --release + restart daemon. Lượt đầu (cold
+prefill) của turbo-fieldfare được tối đa 900s; các lượt sau của cùng hội
+thoại prefill-hit KV cache nên chỉ mất vài giây.

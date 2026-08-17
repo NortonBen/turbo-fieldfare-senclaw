@@ -14,7 +14,13 @@ struct SenClawAppSettings: Equatable, Sendable {
     static let queueLimitRange = 1...16
 
     var maxContextTokens = 16384
-    var maxOutputTokens = 8192
+    /// Advertised as the model card's `max_output_tokens`, which the SenClaw
+    /// agent copies verbatim into every request's `max_tokens`. This is
+    /// therefore the per-turn decode ceiling: at ~20-40 tok/s on a 26B model,
+    /// a runaway completion at 32K would hold the generation slot for many
+    /// minutes and blow the agent's per-turn budget. 4096 bounds the worst
+    /// case to a couple of minutes while staying plenty for chat and tools.
+    var maxOutputTokens = 4096
     var expertCacheSlots = 16
     var expertCachePolicy = AppExpertCachePolicy.lfu
     var prefillEnabled = true
