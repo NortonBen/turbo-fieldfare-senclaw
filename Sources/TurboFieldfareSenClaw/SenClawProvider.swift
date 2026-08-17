@@ -256,33 +256,40 @@ final class SenClawProvider: LlmProvider {
     /// connection thread is parked on the bridge semaphore, so the
     /// non-Sendable `onEvent` closure is safe to hand across.
     ///
-    /// `isCancelled` is checked ONLY at the generation-slot boundary: a turn
-    /// whose client vanished while it waited in the queue did no work and is
-    /// dropped there. A turn that was already admitted runs TO COMPLETION even
-    /// if the client has gone — deliberately. The daemon's agent gives a cloud
-    /// provider 180 s per turn and retries; a first agent turn on a cold
-    /// prefix can exceed that in prefill alone. Finishing the abandoned turn
-    /// commits the single-prefix KV cache, so the retry hits the cache and
-    /// completes inside the budget. Cancelling instead would invalidate the
-    /// cache and make every retry start from zero — the turn could never
-    /// succeed. Writes to the dead socket are harmless no-ops.
+    /// A turn whose client has gone is CANCELLED as soon as that is visible:
+    /// at the slot boundary (queued turns), between emitted events, and — via
+    /// `registerCancel` + the chat route's heartbeat — even mid-prefill, when
+    /// no events flow. An earlier revision let abandoned turns run to
+    /// completion hoping to seed the prompt cache; in practice the cache only
+    /// serves same-conversation continuations, while the daemon's agent
+    /// retries stacked ghost turns behind one another and held the GPU for
+    /// tens of minutes. Nobody-is-reading means stop.
     @discardableResult
     func generate(_ validated: ValidatedChatRequest,
                   isCancelled: @escaping () -> Bool,
+                  registerCancel: ((@escaping @Sendable () -> Void) -> Void)? = nil,
                   onEvent: @escaping (ServerInferenceEvent) -> Void) throws -> ServerCompletion {
         let currentSettings = settings.current
         let modelDirectory = store.modelDirectory
         let engine = self.engine
         let eventBox = UncheckedSendableBox(onEvent)
         let cancelledBox = UncheckedSendableBox(isCancelled)
+        let taskHandle = TaskHandleBox()
 
-        return try BlockingBridge.run {
+        return try BlockingBridge.run(register: { cancel in
+            taskHandle.setCancel(cancel)
+            registerCancel?({ taskHandle.cancel() })
+        }) {
             try await engine.chat(
                 validated,
                 settings: currentSettings,
                 modelDirectory: modelDirectory,
                 isCancelled: { cancelledBox.value() }
             ) { event in
+                if cancelledBox.value() {
+                    taskHandle.cancel()
+                    return
+                }
                 eventBox.value(event)
             }
         }

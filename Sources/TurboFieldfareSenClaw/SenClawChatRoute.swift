@@ -69,10 +69,12 @@ enum SenClawChatRoute {
         validated: ValidatedChatRequest,
         turnID: String,
         isCancelled: @escaping () -> Bool,
+        registerCancel: ((@escaping @Sendable () -> Void) -> Void)? = nil,
         onEvent: @escaping (ServerInferenceEvent) -> Void
     ) throws -> ServerCompletion {
         do {
-            return try provider.generate(validated, isCancelled: isCancelled, onEvent: onEvent)
+            return try provider.generate(validated, isCancelled: isCancelled,
+                                         registerCancel: registerCancel, onEvent: onEvent)
         } catch {
             guard SenClawProvider.isRenderError(error),
                   (body["tools"] as? [Any])?.isEmpty == false else { throw error }
@@ -82,7 +84,7 @@ enum SenClawChatRoute {
             log("[chat] \(turnID) tool phá template: \(culprits.joined(separator: ", ")) — thử lại không có chúng")
             let retried = try provider.validateTurn(body)
             return try provider.generate(retried.request, isCancelled: isCancelled,
-                                         onEvent: onEvent)
+                                         registerCancel: registerCancel, onEvent: onEvent)
         }
     }
 
@@ -100,8 +102,15 @@ enum SenClawChatRoute {
             // favour.
             wire.send(SenClawChatWire.roleChunk(id: turnID))
 
+            // The heartbeat doubles as the disconnect detector: a tick whose
+            // write fails flips `isClosed`, and the next tick cancels the
+            // running generation — even mid-prefill, when no events flow. A
+            // client that walks away frees the engine within ~2 ticks instead
+            // of holding the GPU for the rest of a 20-minute prefill.
+            let cancelHandle = TaskHandleBox()
             let pump = HeartbeatPump(interval: heartbeatSeconds) {
                 wire.send(SenClawChatWire.heartbeatChunk(id: turnID))
+                if wire.isClosed { cancelHandle.cancel() }
             }
             pump.start()
             defer { pump.stop() }
@@ -116,6 +125,7 @@ enum SenClawChatRoute {
                     validated: validated,
                     turnID: turnID,
                     isCancelled: { wire.isClosed },
+                    registerCancel: { cancelHandle.setCancel($0) },
                     onEvent: { event in
                         if firstEventAt == nil { firstEventAt = Date() }
                         switch event {
