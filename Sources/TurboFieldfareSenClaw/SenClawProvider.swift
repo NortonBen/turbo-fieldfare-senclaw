@@ -7,7 +7,10 @@ import TurboFieldfareServerCore
 /// `TurboFieldfareServer` default so clients configured against either agree.
 enum SenClawModelIdentity {
     static let id = "gemma-4-26b-a4b-it"
-    static let displayName = "Gemma 4 26B A4B · TurboFieldfare"
+    /// Model name only — the daemon renders picker rows as
+    /// "<llm.displayName> · <model display name>", so putting the brand here
+    /// would show it twice.
+    static let displayName = "Gemma 4 26B A4B"
 }
 
 /// `LlmProvider` backed by the TurboFieldfare engine.
