@@ -36,6 +36,11 @@ struct SenClawAppSettings: Equatable, Sendable {
     /// after an install finishes), so the first turn does not pay the load.
     /// Paired with `idleUnloadSeconds`, this is the auto load/release cycle.
     var autoWarmEnabled = true
+    /// Hard wall-clock ceiling for one turn, enforced by the app itself so a
+    /// turn can never run unbounded regardless of client behaviour. Sized
+    /// above the worst legitimate case measured on this hardware (a ~21K-token
+    /// agent prompt prefills for ~19 minutes); 0 disables the guard.
+    var maxTurnSeconds = 1500
 
     func validate() throws {
         guard Self.allowedContextTokens.contains(maxContextTokens) else {
@@ -51,6 +56,10 @@ struct SenClawAppSettings: Equatable, Sendable {
         }
         guard idleUnloadSeconds >= 0 else {
             throw SenClawSettingsError.invalid("idleUnloadSeconds không được âm")
+        }
+        guard maxTurnSeconds == 0 || maxTurnSeconds >= 60 else {
+            throw SenClawSettingsError.invalid(
+                "maxTurnSeconds phải là 0 (tắt) hoặc ≥ 60")
         }
         // Same cross-flag rule the CLI and server enforce at parse time; the
         // runtime scheduler needs the head-room, and validating here keeps the
@@ -114,6 +123,7 @@ struct SenClawAppSettings: Equatable, Sendable {
             "queueLimit": queueLimit,
             "idleUnloadSeconds": idleUnloadSeconds,
             "autoWarmEnabled": autoWarmEnabled,
+            "maxTurnSeconds": maxTurnSeconds,
         ]
     }
 
@@ -134,6 +144,7 @@ struct SenClawAppSettings: Equatable, Sendable {
         if let v = intValue(patch["queueLimit"]) { next.queueLimit = v }
         if let v = intValue(patch["idleUnloadSeconds"]) { next.idleUnloadSeconds = v }
         if let v = patch["autoWarmEnabled"] as? Bool { next.autoWarmEnabled = v }
+        if let v = intValue(patch["maxTurnSeconds"]) { next.maxTurnSeconds = v }
         return next
     }
 

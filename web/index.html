@@ -301,6 +301,7 @@ function renderSettings(s, allowed) {
     + onoff('promptCacheEnabled', 'Prompt cache (KV reuse)', 'Tái dùng KV giữa các lượt cùng hội thoại.')
     + onoff('autoWarmEnabled', 'Tự động nạp', 'Nạp model nền ngay khi app chạy / tải xong — lượt đầu không phải đợi.')
     + num('idleUnloadSeconds', 'Tự giải phóng sau (giây)', '0 = giữ trong RAM tới khi app bị dừng.')
+    + num('maxTurnSeconds', 'Trần thời gian một lượt (giây)', 'Watchdog tự hủy lượt chạy quá lâu — không lượt nào chạy vô hạn. 0 = tắt, tối thiểu 60.')
     + num('queueLimit', 'Hàng đợi request', '1–16. Áp dụng khi app khởi động lại.');
 }
 

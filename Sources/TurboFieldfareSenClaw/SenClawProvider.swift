@@ -31,6 +31,10 @@ final class SenClawProvider: LlmProvider {
         self.engine = engine
     }
 
+    /// Current per-turn wall-clock ceiling (0 = off) for the chat route's
+    /// watchdog.
+    var turnDeadlineSeconds: Int { settings.current.maxTurnSeconds }
+
     /// The card the daemon's picker shows. Empty until the checkpoint is
     /// installed and verified — a model nobody can run must not be selectable.
     func models() -> [ModelCard] {

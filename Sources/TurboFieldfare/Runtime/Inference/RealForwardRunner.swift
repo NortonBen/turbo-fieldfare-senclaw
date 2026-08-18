@@ -517,6 +517,12 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
                                               startPosition: startPosition,
                                               config: config)
         for (spanIndex, span) in spans.enumerated() {
+            // Prefilling a long prompt is minutes of GPU work, and the decode
+            // loop's cancellation check is only reached once all of it is
+            // done. Without a check here a cancelled caller — a client that
+            // disconnected, a turn past its deadline — waits out the whole
+            // prefill. One check per chunk bounds that to a single chunk.
+            try Task.checkCancellation()
             let lower = tokens.index(tokens.startIndex, offsetBy: span.tokenOffset)
             let upper = tokens.index(lower, offsetBy: span.tokenCount)
             try await executePrefillChunk(

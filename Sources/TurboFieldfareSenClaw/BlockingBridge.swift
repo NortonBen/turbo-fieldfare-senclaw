@@ -73,3 +73,19 @@ final class UncheckedSendableBox<T>: @unchecked Sendable {
     let value: T
     init(_ value: T) { self.value = value }
 }
+
+/// Fires exactly once across threads — for one-shot log lines from a
+/// repeating watchdog tick.
+final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+
+    /// True only on the first call.
+    func trip() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if fired { return false }
+        fired = true
+        return true
+    }
+}

@@ -32,6 +32,26 @@ final class SenClawSettingsTests: XCTestCase {
         XCTAssertEqual(applied, SenClawAppSettings())
     }
 
+    func testTurnCeilingValidatesAndRoundTrips() throws {
+        var settings = SenClawAppSettings()
+        XCTAssertEqual(settings.maxTurnSeconds, 1500)
+
+        settings.maxTurnSeconds = 0
+        try settings.validate()
+        settings.maxTurnSeconds = 59
+        XCTAssertThrowsError(try settings.validate())
+        settings.maxTurnSeconds = 600
+        try settings.validate()
+
+        let applied = SenClawAppSettings().applying(["maxTurnSeconds": 600])
+        XCTAssertEqual(applied.maxTurnSeconds, 600)
+        // Not part of the load key: changing the ceiling must not force a
+        // model reload.
+        let directory = URL(fileURLWithPath: "/tmp/m.gturbo")
+        XCTAssertEqual(applied.loadKey(modelDirectory: directory),
+                       SenClawAppSettings().loadKey(modelDirectory: directory))
+    }
+
     func testRejectsContextOutsideAllowedSet() {
         var settings = SenClawAppSettings()
         settings.maxContextTokens = 5000

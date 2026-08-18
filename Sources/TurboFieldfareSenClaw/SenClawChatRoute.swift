@@ -102,15 +102,23 @@ enum SenClawChatRoute {
             // favour.
             wire.send(SenClawChatWire.roleChunk(id: turnID))
 
-            // The heartbeat doubles as the disconnect detector: a tick whose
-            // write fails flips `isClosed`, and the next tick cancels the
-            // running generation — even mid-prefill, when no events flow. A
-            // client that walks away frees the engine within ~2 ticks instead
-            // of holding the GPU for the rest of a 20-minute prefill.
+            // The heartbeat doubles as the disconnect detector AND the turn
+            // watchdog: a tick whose write fails flips `isClosed` and the next
+            // tick cancels the running generation — even mid-prefill, when no
+            // events flow — and a turn that outlives `maxTurnSeconds` is
+            // cancelled outright, so no turn can ever run unbounded.
             let cancelHandle = TaskHandleBox()
+            let deadline = provider.turnDeadlineSeconds
+            let expiredOnce = OnceFlag()
             let pump = HeartbeatPump(interval: heartbeatSeconds) {
                 wire.send(SenClawChatWire.heartbeatChunk(id: turnID))
                 if wire.isClosed { cancelHandle.cancel() }
+                if deadline > 0, Date().timeIntervalSince(started) > TimeInterval(deadline) {
+                    if expiredOnce.trip() {
+                        log("[chat] \(turnID) vượt trần \(deadline)s — hủy turn (watchdog)")
+                    }
+                    cancelHandle.cancel()
+                }
             }
             pump.start()
             defer { pump.stop() }
@@ -170,11 +178,27 @@ enum SenClawChatRoute {
                                          started: Date) -> Response {
         var content = ""
         var calls: [ParsedToolCall] = []
+        // Non-stream turns get the same wall-clock watchdog; there is no wire
+        // to heartbeat, so the pump only enforces the ceiling.
+        let cancelHandle = TaskHandleBox()
+        let deadline = provider.turnDeadlineSeconds
+        let expiredOnce = OnceFlag()
+        let pump = HeartbeatPump(interval: heartbeatSeconds) {
+            if deadline > 0, Date().timeIntervalSince(started) > TimeInterval(deadline) {
+                if expiredOnce.trip() {
+                    log("[chat] \(turnID) vượt trần \(deadline)s — hủy turn (watchdog)")
+                }
+                cancelHandle.cancel()
+            }
+        }
+        pump.start()
+        defer { pump.stop() }
         let completion: ServerCompletion
         do {
             completion = try generateWithRenderRecovery(
                 provider: provider, body: body, validated: validated, turnID: turnID,
-                isCancelled: { false }
+                isCancelled: { false },
+                registerCancel: { cancelHandle.setCancel($0) }
             ) { event in
                 switch event {
                 case .content(let text): content += text
